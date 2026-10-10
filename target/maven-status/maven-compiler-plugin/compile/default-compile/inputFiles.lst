@@ -1,0 +1,17 @@
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\common\config\OpenApiConfig.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\common\exception\BadRequestException.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\common\exception\GlobalExceptionHandler.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\common\exception\ResourceNotFoundException.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\common\PageResponse.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\common\web\RequestIdFilter.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\dto\CreateTaskRequest.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\dto\TaskResponse.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\dto\TaskSearchCriteria.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\dto\UpdateTaskRequest.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\Task.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\TaskController.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\TaskRepository.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\TaskService.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\TaskSpecifications.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\task\TaskStatus.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\main\java\com\james\taskflow\TaskflowApplication.java
