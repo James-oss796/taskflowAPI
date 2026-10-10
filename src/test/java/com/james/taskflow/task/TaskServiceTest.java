@@ -35,14 +35,14 @@ public class TaskServiceTest {
     @Test
     void create_savesTaskAndReturnsResponse(){
         var request = new CreateTaskRequest("Learn testing", "desc", null);
-        when(taskRepository.saveAndFlush(any(Task.class)))
+        when(taskRepository.save(any(Task.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         TaskResponse taskResponse = taskService.create(request);
 
         assertThat(taskResponse.title()).isEqualTo("Learn testing");
         assertThat(taskResponse.status()).isEqualTo(TaskStatus.TODO);
-        verify(taskRepository).saveAndFlush(any(Task.class));
+        verify(taskRepository).save(any(Task.class));
     }
 
     @Test
