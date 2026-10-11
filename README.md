@@ -28,7 +28,6 @@ docker compose up --build
 Then open **http://localhost:8080/swagger-ui/index.html** and try the API from your browser. Nothing else to install except Docker.
 
 
-  Add a screenshot of Swagger UI here, then delete this comment:
   ![Swagger UI](docs/images/swagger-ui.png)
 
 
