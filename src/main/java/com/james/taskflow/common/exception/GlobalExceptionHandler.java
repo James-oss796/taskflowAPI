@@ -64,4 +64,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         pd.setTitle("Bad request");
         return pd;
     }
+
+    @ExceptionHandler(ConflictException.class)
+    public ProblemDetail handleConflict(ConflictException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        pd.setTitle("Conflict");
+        return pd;
+    }
 }
