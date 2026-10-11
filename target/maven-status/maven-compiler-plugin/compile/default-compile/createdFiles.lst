@@ -1,0 +1,9 @@
+com\james\taskflow\auth\AuthController.class
+com\james\taskflow\user\UserRepository.class
+com\james\taskflow\auth\AuthService.class
+com\james\taskflow\user\User.class
+com\james\taskflow\security\PasswordConfig.class
+com\james\taskflow\auth\dto\RegisterRequest.class
+com\james\taskflow\common\exception\ConflictException.class
+com\james\taskflow\user\Role.class
+com\james\taskflow\user\dto\UserResponse.class
