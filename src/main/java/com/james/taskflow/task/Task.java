@@ -15,6 +15,9 @@ public class Task {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
+    @Column(name = "owner_id", nullable = false, updatable = false)
+    private UUID ownerId;
+
     @Column(nullable = false, length = 200)
     private String title;
 
@@ -37,14 +40,19 @@ public class Task {
 
     protected Task(){} //required by JPA, hidden from the rest of the code
 
-    public Task(String title, String description, LocalDate dueDate) {
+    public Task(String title, String description, LocalDate dueDate, UUID ownerId) {
         this.title = title;
         this.description = description;
         this.dueDate = dueDate;
+        this.ownerId = ownerId;
     }
 
     public UUID getId() {
         return id;
+    }
+
+    public UUID getOwnerId() {
+        return ownerId;
     }
 
     public String getTitle() {

@@ -1,5 +1,6 @@
 package com.james.taskflow.task;
 
+import com.james.taskflow.support.WithJwtUser;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -8,7 +9,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
-import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Container;
@@ -19,6 +20,7 @@ import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -28,19 +30,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc   // see the import note below
 @Testcontainers
 @ActiveProfiles("test")
-@WithMockUser
+@WithJwtUser
 class TaskApiIntegrationTest {
 
     @Container
     @ServiceConnection
     static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
+    static final UUID OWNER_ID = UUID.fromString("00000000-0000-0000-0000-0000000000a1");
 
     @Autowired MockMvc mockMvc;
     @Autowired TaskRepository repository;
+    @Autowired
+    JdbcTemplate jdbc;
 
     @BeforeEach
-    void cleanDatabase() {
-        repository.deleteAll();
+    void setUp() {
+        jdbc.update("delete from users");   // cascades to tasks
+        jdbc.update("insert into users (id, email, password_hash) values (?, ?, ?)",
+                OWNER_ID, "owner@example.com", "{noop}unused");
     }
 
     @Test
@@ -78,7 +85,7 @@ class TaskApiIntegrationTest {
     @Test
     void search_paginates() throws Exception {
         for (int i = 0; i < 25; i++) {
-            repository.save(new Task("Task " + i, null, null));
+            repository.save(new Task("Task " + i, null, null, OWNER_ID));
         }
 
         mockMvc.perform(get("/api/v1/tasks").param("page", "2").param("size", "10"))
@@ -91,10 +98,10 @@ class TaskApiIntegrationTest {
 
     @Test
     void search_filtersByStatus() throws Exception {
-        Task done = new Task("Finished", null, null);
+        Task done = new Task("Finished", null, null, OWNER_ID);
         done.setStatus(TaskStatus.DONE);
         repository.save(done);
-        repository.save(new Task("Pending", null, null));
+        repository.save(new Task("Pending", null, null, OWNER_ID));
 
         mockMvc.perform(get("/api/v1/tasks").param("status", "DONE"))
                 .andExpect(status().isOk())
@@ -117,8 +124,8 @@ class TaskApiIntegrationTest {
 
     @Test
     void search_treatsPercentSignAsLiteralText() throws Exception {
-        repository.save(new Task("100% done", null, null));
-        repository.save(new Task("1000 tasks", null, null));
+        repository.save(new Task("100% done", null, null, OWNER_ID));
+        repository.save(new Task("1000 tasks", null, null, OWNER_ID));
 
         mockMvc.perform(get("/api/v1/tasks").param("q", "100%"))
                 .andExpect(status().isOk())
@@ -142,7 +149,7 @@ class TaskApiIntegrationTest {
     void pagination_withIdenticalSortValues_neverRepeatsOrSkipsItems() throws Exception {
         LocalDate sameDate = LocalDate.of(2099, 1, 1);
         for (int i = 0; i < 30; i++) {
-            repository.save(new Task("Task " + i, null, sameDate));
+            repository.save(new Task("Task " + i, null, sameDate, OWNER_ID));
         }
 
         Set<String> seenIds = new HashSet<>();

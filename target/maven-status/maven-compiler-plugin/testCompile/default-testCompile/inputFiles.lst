@@ -1,5 +1,11 @@
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\auth\AdminBootstrapIntegrationTest.java
 C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\auth\AuthApiIntegrationTest.java
 C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\auth\AuthFlowIntegrationTest.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\auth\AuthorizationIntegrationTest.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\auth\HardeningIntegrationTest.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\auth\RateLimitingIntegrationTest.java
 C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\auth\RefreshTokenIntegrationTest.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\support\WithJwtUser.java
+C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\support\WithJwtUserSecurityContextFactory.java
 C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\task\TaskApiIntegrationTest.java
 C:\Users\Admin\Desktop\BackendProjects\taskflow\src\test\java\com\james\taskflow\task\TaskServiceTest.java

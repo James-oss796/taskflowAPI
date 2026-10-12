@@ -9,6 +9,7 @@ import java.util.UUID;
 
 public record TaskResponse(
         UUID id,
+        UUID ownerId,
         String title,
         String description,
         TaskStatus status,
@@ -19,6 +20,7 @@ public record TaskResponse(
     public static TaskResponse from(Task t) {
         return new TaskResponse(
                 t.getId(),
+                t.getOwnerId(),
                 t.getTitle(),
                 t.getDescription(),
                 t.getStatus(),

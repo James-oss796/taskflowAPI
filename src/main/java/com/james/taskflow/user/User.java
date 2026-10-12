@@ -28,6 +28,17 @@ public class User {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    @Column(name = "failed_login_attempts", nullable = false)
+    private int failedLoginAttempts;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
+    public boolean isLockedAt(Instant now) {
+        return lockedUntil != null && lockedUntil.isAfter(now);
+    }
+// add getFailedLoginAttempts() and getLockedUntil()
+
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -39,9 +50,18 @@ public class User {
     protected User() {
     }
 
-    public User(String email, String passwordHash) {
+    public User(String email, String passwordHash, Role role) {
         this.email = email;
         this.passwordHash = passwordHash;
+        this.role = role;
+    }
+
+    public Instant getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public int getFailedLoginAttempts() {
+        return failedLoginAttempts;
     }
 
     public Instant getUpdatedAt() {

@@ -40,3 +40,20 @@ app:
     issuer: taskflow-api
     access-token-ttl: 15m
     refresh-token-ttl: 7d
+  rate-limit:
+    max-requests: 10
+    window: 1m
+  login-protection:
+    max-failed-attempts: 5
+    lock-duration: 15m
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  bootstrap-admin:
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}

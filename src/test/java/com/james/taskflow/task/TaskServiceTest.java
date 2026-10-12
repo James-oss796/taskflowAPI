@@ -2,6 +2,7 @@ package com.james.taskflow.task;
 
 import com.james.taskflow.common.exception.BadRequestException;
 import com.james.taskflow.common.exception.ResourceNotFoundException;
+import com.james.taskflow.security.AuthenticatedUser;
 import com.james.taskflow.task.dto.CreateTaskRequest;
 import com.james.taskflow.task.dto.TaskResponse;
 import com.james.taskflow.task.dto.TaskSearchCriteria;
@@ -24,59 +25,52 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class TaskServiceTest {
+class TaskServiceTest {
 
-    @Mock
-    TaskRepository taskRepository;
+    @Mock TaskRepository repository;
+    @InjectMocks TaskService service;
 
-    @InjectMocks
-    TaskService taskService;
+    static final UUID OWNER = UUID.randomUUID();
+    final AuthenticatedUser owner = new AuthenticatedUser(OWNER, false);
+    final AuthenticatedUser stranger = new AuthenticatedUser(UUID.randomUUID(), false);
+    final AuthenticatedUser admin = new AuthenticatedUser(UUID.randomUUID(), true);
 
     @Test
-    void create_savesTaskAndReturnsResponse(){
-        var request = new CreateTaskRequest("Learn testing", "desc", null);
-        when(taskRepository.save(any(Task.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
-
-        TaskResponse taskResponse = taskService.create(request);
-
-        assertThat(taskResponse.title()).isEqualTo("Learn testing");
-        assertThat(taskResponse.status()).isEqualTo(TaskStatus.TODO);
-        verify(taskRepository).save(any(Task.class));
+    void create_assignsTheCurrentUserAsOwner() {
+        when(repository.save(any(Task.class))).thenAnswer(i -> i.getArgument(0));
+        TaskResponse response = service.create(new CreateTaskRequest("Learn", "desc", null), owner);
+        assertThat(response.ownerId()).isEqualTo(OWNER);
+        assertThat(response.status()).isEqualTo(TaskStatus.TODO);
     }
 
     @Test
-    void findById_whenMissing_throwsNotFound() {
+    void findById_ofAnotherUsersTask_looksLikeNotFound() {
         UUID id = UUID.randomUUID();
-        when(taskRepository.findById(id)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> taskService.findById(id))
-                .isInstanceOf(ResourceNotFoundException.class)
-                .hasMessageContaining(id.toString());
+        when(repository.findById(id)).thenReturn(Optional.of(new Task("secret", null, null, OWNER)));
+        assertThatThrownBy(() -> service.findById(id, stranger)).isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test
-    void update_changesAllEditableFields() {
+    void findById_asAdmin_canReadAnyTask() {
         UUID id = UUID.randomUUID();
-        Task existing = new Task("Old", "old desc", null);
-        when(taskRepository.findById(id)).thenReturn(Optional.of(existing));
-        when(taskRepository.saveAndFlush(existing)).thenReturn(existing);
-
-        var request = new UpdateTaskRequest("New", "new desc", TaskStatus.DONE, null);
-        TaskResponse response = taskService.update(id, request);
-
-        assertThat(response.title()).isEqualTo("New");
-        assertThat(response.status()).isEqualTo(TaskStatus.DONE);
+        when(repository.findById(id)).thenReturn(Optional.of(new Task("secret", null, null, OWNER)));
+        assertThat(service.findById(id, admin).title()).isEqualTo("secret");
     }
 
     @Test
-    void search_withNonWhitelistedSort_isRejectedBeforeTouchingDatabase() {
+    void update_byStranger_isNotFound_andNothingIsSaved() {
+        UUID id = UUID.randomUUID();
+        when(repository.findById(id)).thenReturn(Optional.of(new Task("t", null, null, OWNER)));
+        var req = new UpdateTaskRequest("hacked", null, TaskStatus.DONE, null);
+        assertThatThrownBy(() -> service.update(id, req, stranger)).isInstanceOf(ResourceNotFoundException.class);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void search_withNonWhitelistedSort_isRejected_beforeTouchingTheDatabase() {
         var pageable = PageRequest.of(0, 10, Sort.by("password"));
-        var criteria = new TaskSearchCriteria(null, null, null);
-
-        assertThatThrownBy(() -> taskService.search(criteria, pageable))
+        assertThatThrownBy(() -> service.search(new TaskSearchCriteria(null, null, null), pageable, owner))
                 .isInstanceOf(BadRequestException.class);
-
-        verifyNoInteractions(taskRepository);
+        verifyNoInteractions(repository);
     }
 }
