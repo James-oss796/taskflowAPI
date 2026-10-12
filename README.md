@@ -2,16 +2,17 @@
 
 # TaskFlow API
 
-**A production-minded task management REST API, built to show how a backend is engineered, not just coded: layered design, validated input, versioned migrations, real-database tests, containers and CI.**
+**A secure, production-minded task management REST API: JWT authentication with rotating refresh tokens, per-user data isolation, role-based access, brute-force protection, and a fully automated test and delivery pipeline.**
 
 ![CI](https://github.com/James-oss796/taskflowAPI/actions/workflows/ci.yml/badge.svg)
 ![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)
+![Spring Security](https://img.shields.io/badge/Spring%20Security-JWT-6DB33F?logo=springsecurity&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-[Quick start](#quick-start) · [API reference](#api-reference) · [Architecture](#architecture) · [Concepts explained](#concepts-explained) · [Design decisions](#design-decisions-and-trade-offs) · [Troubleshooting](#troubleshooting)
+[Quick start](#quick-start) · [Security model](#security-model) · [API reference](#api-reference) · [Architecture](#architecture) · [Concepts explained](#concepts-explained) · [Design decisions](#design-decisions-and-trade-offs) · [Troubleshooting](#troubleshooting)
 
 </div>
 
@@ -22,40 +23,44 @@
 ```bash
 git clone https://github.com/James-oss796/taskflowAPI.git
 cd taskflowAPI
+cp .env.example .env
+openssl rand -base64 32        # copy the output into .env as JWT_SECRET=...
 docker compose up --build
 ```
 
-Then open **http://localhost:8080/swagger-ui/index.html** and try the API from your browser. Nothing else to install except Docker.
-
+Open **http://localhost:8080/swagger-ui/index.html**, register, log in, click **Authorize**, and paste the access token to try every endpoint.
 
   ![Swagger UI](docs/images/swagger-ui.png)
 
 
-| What a backend should have | Where it lives in this repo |
+| What a production backend needs | Where it lives in this repo |
 |---|---|
-| Clear layers (controller, service, repository) and DTOs at the boundary | `src/main/java/com/james/taskflow/task/` |
-| REST design: versioned URLs, correct status codes, RFC 7807 errors | `TaskController`, `GlobalExceptionHandler` |
+| Layered design, DTO boundary, validation, RFC 7807 errors | `task/`, `common/exception/` |
+| Password hashing (BCrypt, delegating encoder, timing-attack defence) | `auth/AuthService`, `security/PasswordConfig` |
+| Stateless JWT access tokens and the Spring Security filter chain | `security/` |
+| Rotating refresh tokens with reuse detection (stored as hashes) | `auth/token/` |
+| Per-user data isolation and roles (BOLA/IDOR protection) | `task/TaskService`, `user/`, `security/AuthenticatedUser` |
+| Brute-force defences: rate limiting and account lockout | `security/RateLimitFilter`, `AuthService` |
+| Security headers, CORS, secrets from the environment, fail-fast config | `security/SecurityConfig`, `JwtConfig` |
 | Versioned database migrations and indexes | `src/main/resources/db/migration/` |
-| Dynamic filtering, bounded pagination, deterministic sorting | `TaskSpecifications`, `TaskService.search` |
-| Defensive input handling (validation, sort whitelist, `LIKE` escaping, log-injection guard) | `CreateTaskRequest`, `TaskService`, `RequestIdFilter` |
-| Observability: request IDs in every log line, health and readiness probes | `RequestIdFilter`, Spring Boot Actuator |
-| Tests against a real PostgreSQL (not a fake) | `src/test/java/` with Testcontainers |
-| Containerised build, CI pipeline, published image | `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` |
+| Tests against a real PostgreSQL, including security regression tests | `src/test/java/` |
+| Containerised build, CI pipeline with an authenticated smoke test, published image | `Dockerfile`, `.github/workflows/ci.yml` |
 
 ## Contents
 
 1. [Tech stack](#tech-stack)
 2. [Architecture](#architecture)
-3. [Quick start](#quick-start)
-4. [API reference](#api-reference)
-5. [Concepts explained](#concepts-explained)
-6. [Testing](#testing)
-7. [Docker and CI/CD](#docker-and-cicd)
-8. [Project structure](#project-structure)
-9. [Design decisions and trade-offs](#design-decisions-and-trade-offs)
-10. [Troubleshooting](#troubleshooting)
-11. [Limitations and roadmap](#limitations-and-roadmap)
-12. [Follow the build](#follow-the-build)
+3. [Security model](#security-model)
+4. [Quick start](#quick-start)
+5. [API reference](#api-reference)
+6. [Concepts explained](#concepts-explained)
+7. [Testing](#testing)
+8. [Docker and CI/CD](#docker-and-cicd)
+9. [Project structure](#project-structure)
+10. [Design decisions and trade-offs](#design-decisions-and-trade-offs)
+11. [Troubleshooting](#troubleshooting)
+12. [Limitations and roadmap](#limitations-and-roadmap)
+13. [Follow the build](#follow-the-build)
 
 ---
 
@@ -65,76 +70,139 @@ Then open **http://localhost:8080/swagger-ui/index.html** and try the API from y
 |---|---|---|
 | Language | Java 21 | Current LTS, records for concise DTOs |
 | Framework | Spring Boot 4.x | Industry standard, strong ecosystem |
-| Persistence | Spring Data JPA (Hibernate) | Productive data access, Specifications for dynamic queries |
-| Database | PostgreSQL 16 | Reliable, strict, great tooling |
+| Security | Spring Security, OAuth2 resource server (Nimbus JWT) | Framework-verified tokens instead of hand-written verification |
+| Persistence | Spring Data JPA (Hibernate), PostgreSQL 16 | Productive data access, strict relational model |
 | Migrations | Flyway | Versioned, reviewable schema changes |
-| API docs | springdoc-openapi (Swagger UI) | Docs generated from the code, so they stay true |
-| Testing | JUnit, Mockito, AssertJ, MockMvc, Testcontainers | Fast unit tests plus realistic integration tests |
-| Packaging | Docker (multi-stage), Docker Compose | Reproducible runs on any machine |
+| API docs | springdoc-openapi (Swagger UI with a Bearer "Authorize" button) | Docs generated from code |
+| Testing | JUnit, Mockito, AssertJ, MockMvc, Spring Security Test, Testcontainers | Fast unit tests plus realistic integration tests |
+| Packaging | Docker (multi-stage), Docker Compose | Reproducible runs |
 | CI/CD | GitHub Actions, GitHub Container Registry | Every push is built, tested and smoke-tested |
 
 ---
 
 ## Architecture
 
-### Layers
-
-Each layer has one job. Dependencies point downward only, so any layer can be tested or replaced without touching the others.
+### Layers and the security filter chain
 
 ```mermaid
 flowchart LR
-    C["Client or Swagger UI"] -->|HTTP| F["RequestIdFilter<br/>assigns X-Request-Id"]
-    F --> TC["TaskController<br/>HTTP and validation"]
-    TC --> TS["TaskService<br/>business rules and transactions"]
-    TS --> TR["TaskRepository<br/>Spring Data JPA and Specifications"]
+    C["Client or Swagger UI"] -->|HTTP| F1["RequestIdFilter<br/>X-Request-Id"]
+    F1 --> F2["RateLimitFilter<br/>auth endpoints"]
+    F2 --> S["Spring Security chain<br/>JWT verification, CORS, headers"]
+    S --> TC["Controllers<br/>HTTP and validation"]
+    TC --> TS["Services<br/>business rules, ownership, transactions"]
+    TS --> TR["Repositories<br/>Spring Data JPA"]
     TR --> DB[("PostgreSQL 16<br/>schema owned by Flyway")]
     TC -.->|exceptions| EH["GlobalExceptionHandler<br/>RFC 7807 Problem Details"]
-```
-
-### One request, end to end
-
-What happens when a client searches for completed tasks:
-
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant F as RequestIdFilter
-    participant Ctl as TaskController
-    participant S as TaskService
-    participant R as TaskRepository
-    participant DB as PostgreSQL
-
-    C->>F: GET /api/v1/tasks?status=DONE&page=0&size=20
-    F->>F: create requestId and store in MDC
-    F->>Ctl: forward request
-    Ctl->>Ctl: validate page, size and direction
-    Ctl->>S: search(criteria, pageable)
-    S->>S: whitelist sort fields and add id tie-breaker
-    S->>R: findAll(specification, pageable)
-    R->>DB: SELECT with WHERE, ORDER BY and LIMIT/OFFSET
-    R->>DB: SELECT count for totals
-    DB-->>R: rows and total
-    R-->>S: page of Task entities
-    S-->>Ctl: PageResponse of TaskResponse DTOs
-    Ctl-->>C: 200 JSON and X-Request-Id header
 ```
 
 ### Data model
 
 ```mermaid
 erDiagram
+    USERS ||--o{ TASKS : owns
+    USERS ||--o{ REFRESH_TOKENS : has
+    USERS {
+        uuid id PK
+        varchar email "unique, lowercase"
+        varchar password_hash "BCrypt via delegating encoder"
+        varchar role "USER or ADMIN"
+        boolean enabled
+        int failed_login_attempts
+        timestamptz locked_until
+    }
     TASKS {
         uuid id PK
-        varchar title "required, max 200"
+        uuid owner_id FK
+        varchar title
         text description
-        varchar status "TODO, IN_PROGRESS or DONE"
+        varchar status "TODO, IN_PROGRESS, DONE"
         date due_date
-        timestamptz created_at
-        timestamptz updated_at
+    }
+    REFRESH_TOKENS {
+        uuid id PK
+        uuid user_id FK
+        uuid family_id "one login session"
+        varchar token_hash "SHA-256, never the raw token"
+        timestamptz expires_at
+        timestamptz used_at
+        timestamptz revoked_at
     }
 ```
 
-Indexes on `status`, `due_date` and `created_at` (migration `V2`) support the filters and sort orders the API exposes. Indexes are a read/write trade-off, so only columns that queries actually use are indexed.
+---
+
+## Security model
+
+### Authentication flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as API
+    participant DB as PostgreSQL
+
+    C->>A: POST /auth/register (email, password)
+    A->>DB: insert user with BCrypt hash
+    A-->>C: 201 id, email, role
+    C->>A: POST /auth/login
+    A->>DB: verify hash, create refresh token family
+    A-->>C: accessToken (15 min) and refreshToken (7 days)
+    C->>A: GET /tasks with Authorization Bearer accessToken
+    A->>A: verify signature, expiry and issuer
+    A->>DB: query only this user's tasks
+    A-->>C: 200
+    Note over C,A: the access token expires
+    C->>A: POST /auth/refresh (refreshToken)
+    A->>DB: mark old token used and store the new one
+    A-->>C: new accessToken and new refreshToken
+```
+
+### Refresh token rotation and reuse detection
+
+Every refresh token works exactly once. If a spent token is presented again, it has been copied, so the whole session family is revoked.
+
+```mermaid
+sequenceDiagram
+    participant U as Legitimate user
+    participant T as Attacker
+    participant A as API
+
+    U->>A: refresh with RT1
+    A-->>U: RT2 (RT1 is now used)
+    T->>A: refresh with stolen RT1
+    A->>A: RT1 already used, reuse detected
+    A->>A: revoke every token in the family
+    A-->>T: 401
+    U->>A: refresh with RT2
+    A-->>U: 401, the family is revoked, log in again
+```
+
+### Threats and defences
+
+| Threat | Defence |
+|---|---|
+| Database leak exposes passwords | BCrypt (salted, slow) via a delegating encoder that supports algorithm upgrades |
+| Database leak exposes sessions | Refresh tokens stored only as SHA-256 hashes |
+| Stolen access token | Short lifetime (15 minutes), stateless verification |
+| Stolen refresh token | Single-use rotation plus family revocation on reuse |
+| Password guessing | Per-IP rate limiting (HTTP 429) and per-account lockout after 5 failures for 15 minutes |
+| Account enumeration | One identical error for unknown email, wrong password, locked and disabled accounts, plus equal BCrypt work for every attempt |
+| Reading or changing another user's data (BOLA/IDOR) | Every task query is scoped to the caller. Other users' tasks return `404`, never `403` |
+| Privilege escalation | Roles come from the signed token. Admin endpoints require `ROLE_ADMIN`. No public way to become admin |
+| Secret leakage | `JWT_SECRET` only from the environment, no default, app refuses to start without it. Credentials masked in `toString()` and never logged |
+| Cross-origin abuse | Explicit CORS allow-list, no wildcard |
+| Token theft via caching or sniffing | `Cache-Control: no-store` on API responses, `nosniff`, `Referrer-Policy`, HSTS over HTTPS |
+
+### Authorization rules
+
+| Endpoint group | Anonymous | USER | ADMIN |
+|---|---|---|---|
+| `POST /auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout` | yes | yes | yes |
+| `GET /actuator/health`, Swagger UI, OpenAPI document | yes | yes | yes |
+| `GET /auth/me` | no | yes | yes |
+| `/tasks` (create, read, update, delete, search) | no | own tasks only | all tasks |
+| `GET /admin/users` | no | `403` | yes |
 
 ---
 
@@ -144,39 +212,57 @@ Indexes on `status`, `due_date` and `created_at` (migration `V2`) support the fi
 
 | Tool | Needed for | Check |
 |---|---|---|
-| Docker Desktop (or Docker Engine with Compose v2) | Running the app, and the integration tests | `docker --version` |
+| Docker Desktop (or Docker Engine with Compose v2) | Running the app and the integration tests | `docker --version` |
 | JDK 21 | Only for local development without Docker | `java -version` |
 | Git | Cloning | `git --version` |
 
-### Option A: run everything in Docker
+### Configure secrets
+
+The app refuses to start without a signing secret, and there is deliberately no default.
 
 ```bash
-git clone https://github.com/James-oss796/taskflowAPI.git
-cd taskflowAPI
+cp .env.example .env
+openssl rand -base64 32      # paste the output after JWT_SECRET= in .env
+```
+
+<details>
+<summary>Generating the secret on Windows PowerShell</summary>
+
+```powershell
+Copy-Item .env.example .env
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+```
+
+</details>
+
+`.env` is gitignored. Never commit it.
+
+### Option A: everything in Docker
+
+```bash
 docker compose up --build
 ```
 
 | URL | What it is |
 |---|---|
 | http://localhost:8080/swagger-ui/index.html | Interactive API documentation |
-| http://localhost:8080/v3/api-docs | Raw OpenAPI document (JSON) |
+| http://localhost:8080/v3/api-docs | OpenAPI document |
 | http://localhost:8080/actuator/health | Health check |
 
-Stop it:
-
 ```bash
-docker compose down        # stop containers, keep the data
-docker compose down -v     # stop containers and delete the database volume
+docker compose down        # stop, keep data
+docker compose down -v     # stop and delete the database volume
 ```
 
 ### Option B: develop locally (database in Docker, app on your machine)
 
 ```bash
 docker compose up -d db
+export JWT_SECRET="<your generated secret>"
 ./mvnw spring-boot:run
 ```
 
-On Windows PowerShell use `.\mvnw.cmd spring-boot:run`.
+On Windows PowerShell: `$env:JWT_SECRET = "<secret>"` then `.\mvnw.cmd spring-boot:run`.
 
 ### Run the tests
 
@@ -184,195 +270,161 @@ On Windows PowerShell use `.\mvnw.cmd spring-boot:run`.
 ./mvnw verify
 ```
 
-Docker must be running: the integration tests start a throwaway PostgreSQL container with Testcontainers.
+Docker must be running: the integration tests start PostgreSQL with Testcontainers. Tests use their own throwaway secret from `application-test.yml`.
 
 ### Configuration
 
-The app reads its settings from environment variables, with local-development defaults. Nothing secret is committed. The credentials in `docker-compose.yml` are throwaway values for local use only.
-
 | Variable | Default | Purpose |
 |---|---|---|
+| `JWT_SECRET` | none, **required** | Base64 of at least 32 random bytes, used to sign access tokens |
 | `DB_URL` | `jdbc:postgresql://localhost:5432/taskflow` | JDBC connection string |
-| `DB_USER` | `taskflow` | Database user |
-| `DB_PASSWORD` | `taskflow` | Database password |
+| `DB_USER`, `DB_PASSWORD` | `taskflow` | Database credentials (throwaway local values) |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | empty | Optional bootstrap admin created at startup if the email is unused (password must be 12+ characters) |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173` | Comma-separated list of browser origins allowed to call the API |
+| `SWAGGER_ENABLED` | `true` | Set to `false` in production to hide the docs |
+
+Other tunables (`app.rate-limit.*`, `app.login-protection.*`, token lifetimes) are in `application.yml`.
 
 ### Run the published image
-
-Every push to `main` publishes an image to GitHub Container Registry, tagged with the commit SHA and `latest`.
 
 ```bash
 docker pull ghcr.io/james-oss796/taskflowapi:latest
 
 docker run --rm -p 8080:8080 \
+  -e JWT_SECRET="<your generated secret>" \
   -e DB_URL=jdbc:postgresql://host.docker.internal:5432/taskflow \
   -e DB_USER=taskflow -e DB_PASSWORD=taskflow \
   ghcr.io/james-oss796/taskflowapi:latest
 ```
 
-This expects the database from `docker compose up -d db` to be running. If the package is private, run `docker login ghcr.io` first.
+Expects the database from `docker compose up -d db`. If the package is private, run `docker login ghcr.io` first.
 
 ---
 
 ## API reference
 
-Base path: `/api/v1`. The version is part of the URL so breaking changes can ship as `/v2` without breaking existing clients.
+Base path `/api/v1`. The version is part of the URL so breaking changes can ship as `/v2`.
+
+### Auth
+
+| Method | Path | Auth | Description | Success | Errors |
+|---|---|---|---|---|---|
+| `POST` | `/auth/register` | none | Create an account | `201` | `400`, `409`, `429` |
+| `POST` | `/auth/login` | none | Exchange credentials for tokens | `200` | `400`, `401`, `429` |
+| `POST` | `/auth/refresh` | refresh token | Rotate: new access and refresh tokens | `200` | `400`, `401`, `429` |
+| `POST` | `/auth/logout` | refresh token | Revoke the whole session | `204` | `400` |
+| `GET` | `/auth/me` | Bearer | Identity carried by the token | `200` | `401` |
+
+### Tasks (Bearer token required, scoped to the caller)
 
 | Method | Path | Description | Success | Errors |
 |---|---|---|---|---|
-| `POST` | `/tasks` | Create a task | `201` with `Location` header | `400` |
-| `GET` | `/tasks` | Search with filters, pagination, sorting | `200` | `400` |
-| `GET` | `/tasks/{id}` | Get one task | `200` | `400` (malformed id), `404` |
-| `PUT` | `/tasks/{id}` | Update a task | `200` | `400`, `404` |
-| `DELETE` | `/tasks/{id}` | Delete a task | `204` | `400`, `404` |
+| `POST` | `/tasks` | Create a task owned by the caller | `201` with `Location` | `400`, `401` |
+| `GET` | `/tasks` | Search with filters, pagination, sorting | `200` | `400`, `401` |
+| `GET` | `/tasks/{id}` | Get one task | `200` | `400`, `401`, `404` |
+| `PUT` | `/tasks/{id}` | Update a task | `200` | `400`, `401`, `404` |
+| `DELETE` | `/tasks/{id}` | Delete a task | `204` | `400`, `401`, `404` |
 
-Operational endpoints: `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`.
+### Admin
+
+| Method | Path | Description | Success | Errors |
+|---|---|---|---|---|
+| `GET` | `/admin/users?page=0&size=20` | List users | `200` | `401`, `403` |
 
 ### Search parameters (`GET /tasks`)
 
 | Parameter | Type | Default | Notes |
 |---|---|---|---|
 | `status` | `TODO`, `IN_PROGRESS`, `DONE` | none | Exact match |
-| `q` | text | none | Case-insensitive "title contains". `%` and `_` are treated as literal characters |
-| `dueBefore` | date `YYYY-MM-DD` | none | Tasks due strictly before this date |
-| `page` | integer, 0 or more | `0` | Zero-based page index |
-| `size` | integer, 1 to 100 | `20` | Page size. Out-of-range values are rejected, not silently changed |
+| `q` | text | none | Case-insensitive "title contains". `%` and `_` are literal |
+| `dueBefore` | `YYYY-MM-DD` | none | Due strictly before this date |
+| `page` | integer, 0 or more | `0` | Zero-based |
+| `size` | integer, 1 to 100 | `20` | Out-of-range values are rejected |
 | `sortBy` | `createdAt`, `updatedAt`, `dueDate`, `title`, `status` | `createdAt` | Anything else returns `400` |
 | `direction` | `asc` or `desc` | `desc` | |
 
-### Try it
-
-Create a task:
+### Try the whole flow
 
 ```bash
-curl -s -X POST http://localhost:8080/api/v1/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Write README","description":"Make it recruiter-ready","dueDate":"2030-01-01"}'
-```
+BASE=http://localhost:8080/api/v1
 
-Search, filtered and sorted:
+curl -s -X POST $BASE/auth/register -H 'Content-Type: application/json' \
+  -d '{"email":"demo@example.com","password":"correct-horse-battery"}'
 
-```bash
-curl -s "http://localhost:8080/api/v1/tasks?status=TODO&q=readme&sortBy=dueDate&direction=asc&page=0&size=10"
-```
+LOGIN=$(curl -s -X POST $BASE/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"demo@example.com","password":"correct-horse-battery"}')
+TOKEN=$(echo "$LOGIN" | jq -r .accessToken)
+REFRESH=$(echo "$LOGIN" | jq -r .refreshToken)
 
-Update (replace `<ID>` with the `id` from the create response):
+curl -s -X POST $BASE/tasks -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"First task","dueDate":"2030-01-01"}'
 
-```bash
-curl -s -X PUT http://localhost:8080/api/v1/tasks/<ID> \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Write README","description":"Done","status":"DONE","dueDate":"2030-01-01"}'
-```
+curl -s "$BASE/tasks?status=TODO&sortBy=dueDate&direction=asc" -H "Authorization: Bearer $TOKEN"
 
-Delete:
+curl -s -X POST $BASE/auth/refresh -H 'Content-Type: application/json' \
+  -d "{\"refreshToken\":\"$REFRESH\"}"
 
-```bash
-curl -i -X DELETE http://localhost:8080/api/v1/tasks/<ID>
+curl -i -X POST $BASE/auth/refresh -H 'Content-Type: application/json' \
+  -d "{\"refreshToken\":\"$REFRESH\"}"     # the used token is rejected: 401
 ```
 
 <details>
 <summary>Windows PowerShell equivalents</summary>
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/tasks `
-  -ContentType "application/json" `
-  -Body '{"title":"Write README","dueDate":"2030-01-01"}'
-
-Invoke-RestMethod "http://localhost:8080/api/v1/tasks?status=TODO&size=10"
+$base = "http://localhost:8080/api/v1"
+$creds = '{"email":"demo@example.com","password":"correct-horse-battery"}'
+Invoke-RestMethod -Method Post "$base/auth/register" -ContentType "application/json" -Body $creds
+$login = Invoke-RestMethod -Method Post "$base/auth/login" -ContentType "application/json" -Body $creds
+$h = @{ Authorization = "Bearer $($login.accessToken)" }
+Invoke-RestMethod -Method Post "$base/tasks" -Headers $h -ContentType "application/json" -Body '{"title":"First task"}'
+Invoke-RestMethod "$base/tasks?status=TODO" -Headers $h
 ```
 
-When typing a literal `%` in a URL, encode it as `%25` (for example `q=100%25`).
-
-</details>
-
-<details>
-<summary>Example success response (201 Created)</summary>
-
-```json
-{
-  "id": "3f6c1d2e-8a4b-4c1e-9d3a-0b7e5f2a9c10",
-  "title": "Write README",
-  "description": "Make it recruiter-ready",
-  "status": "TODO",
-  "dueDate": "2030-01-01",
-  "createdAt": "2026-10-11T08:30:00Z",
-  "updatedAt": "2026-10-11T08:30:00Z"
-}
-```
-
-</details>
-
-<details>
-<summary>Example search response (200 OK)</summary>
-
-```json
-{
-  "content": [ { "id": "3f6c1d2e-...", "title": "Write README", "status": "TODO" } ],
-  "page": 0,
-  "size": 10,
-  "totalElements": 1,
-  "totalPages": 1,
-  "first": true,
-  "last": true
-}
-```
+When typing a literal `%` in a URL, encode it as `%25`.
 
 </details>
 
 ### Errors
 
-All errors use [RFC 7807 Problem Details](https://www.rfc-editor.org/rfc/rfc7807), so clients parse one consistent shape.
+All errors are [RFC 7807 Problem Details](https://www.rfc-editor.org/rfc/rfc7807), so clients parse one shape.
+
+| Status | When |
+|---|---|
+| `400` | Validation failed, malformed parameter or id (`errors` map lists the fields) |
+| `401` | Missing, invalid or expired token, or bad credentials (always the same message) |
+| `403` | Authenticated but lacking the required role |
+| `404` | Resource does not exist **or belongs to someone else** (deliberately indistinguishable) |
+| `409` | Email already registered |
+| `429` | Rate limit exceeded (includes a `Retry-After` header) |
+| `500` | Unexpected: generic message plus a `requestId` that matches the server log |
 
 <details>
-<summary>Validation error (400)</summary>
-
-```bash
-curl -s -X POST http://localhost:8080/api/v1/tasks \
-  -H "Content-Type: application/json" -d '{"title":""}'
-```
+<summary>Example: validation error (400)</summary>
 
 ```json
 {
   "title": "Invalid request",
   "status": 400,
   "detail": "Validation failed",
-  "instance": "/api/v1/tasks",
-  "errors": { "title": "title is required" }
+  "instance": "/api/v1/auth/register",
+  "errors": { "password": "password must be 8 to 72 characters" }
 }
 ```
 
 </details>
-
-<details>
-<summary>Not found (404)</summary>
-
-```bash
-curl -s http://localhost:8080/api/v1/tasks/00000000-0000-0000-0000-000000000000
-```
-
-```json
-{
-  "title": "Resource not found",
-  "status": 404,
-  "detail": "Task not found with id: 00000000-0000-0000-0000-000000000000",
-  "instance": "/api/v1/tasks/00000000-0000-0000-0000-000000000000"
-}
-```
-
-</details>
-
-Unexpected server errors return a generic message plus a `requestId`, while the full stack trace stays in the server logs under the same ID. Clients never see internals.
 
 ---
 
 ## Concepts explained
 
-This section explains *why* the code looks the way it does. Each concept follows the same pattern: the problem, the solution, the code, and a command you can run to see it work. The same ideas recur in every backend system, so learn the pattern, not the syntax.
+This section explains *why* the code looks the way it does. Each concept follows the same pattern: the problem, the solution, the code, and something you can run. The same ideas recur in every backend system, so learn the pattern, not the syntax.
 
 ### 1. Layers and the DTO boundary
 
-**Problem.** If controllers return database entities directly, every database change breaks your API, and sensitive columns (a future `passwordHash`) leak into JSON.
+**Problem.** Controllers that return database entities couple the API to the schema and leak sensitive columns (a `passwordHash`, an `ownerId` you did not mean to expose).
 
-**Solution.** Each layer has one responsibility, and entities never leave the service layer. The outside world only sees DTOs.
+**Solution.** Each layer has one job, and entities never leave the service layer.
 
 ```text
 Request DTO -> Controller -> Service -> Repository -> Entity -> DB
@@ -380,292 +432,146 @@ Request DTO -> Controller -> Service -> Repository -> Entity -> DB
 Response DTO <- Controller <- Service <-----+
 ```
 
-| Layer | Responsibility | Must not |
-|---|---|---|
-| Controller | Parse HTTP, validate input, pick status codes | Contain business rules |
-| Service | Business rules, transactions | Know about HTTP |
-| Repository | Data access | Contain business rules |
-| DTO (Java `record`) | The public contract | Expose entity internals |
+Request DTOs have no `id`, timestamps or owner, so clients cannot set them. Response DTOs have no password hash, so it cannot leak. Credentials are also masked in `toString()` (`RegisterRequest`, `LoginRequest`, `LoginResponse`, `JwtProperties`), because Java records print every field and one careless `log.info("{}", request)` would otherwise write secrets to the logs.
 
-```java
-public record TaskResponse(UUID id, String title, String description,
-                           TaskStatus status, LocalDate dueDate,
-                           Instant createdAt, Instant updatedAt) {
-    public static TaskResponse from(Task t) { /* map entity to DTO */ }
-}
-```
+### 2. Validate at the edge, fail loudly
 
-The system owns `id`, `createdAt` and `updatedAt`. Clients can never set them, because they do not exist on the request DTOs.
-
-### 2. Validate at the edge
-
-**Problem.** Bad data that reaches business logic or the database is harder to diagnose and can corrupt state. Frontend validation alone is not protection, because anyone can call the API with `curl`.
-
-**Solution.** Declare constraints on the request DTO and reject early.
-
-```java
-public record CreateTaskRequest(
-        @NotBlank(message = "title is required")
-        @Size(max = 200, message = "title must be at most 200 characters")
-        String title,
-
-        @Size(max = 5000) String description,
-
-        @FutureOrPresent(message = "dueDate cannot be in the past")
-        LocalDate dueDate
-) {}
-```
-
-Query parameters are strict too. `page=abc`, `size=5000`, `direction=sideways` and unknown sort fields all return `400`. A framework that silently falls back to defaults hides client bugs, so this API fails loudly instead.
+Constraints live on the request DTOs (`@NotBlank`, `@Size`, `@Email`), and query parameters are strict: `page=abc`, `size=5000` and unknown sort fields all return `400` instead of silently falling back to defaults. Silent defaults hide client bugs.
 
 ```bash
-curl -i "http://localhost:8080/api/v1/tasks?size=5000"     # 400, not a silently capped 100
+curl -i "http://localhost:8080/api/v1/tasks?size=5000" -H "Authorization: Bearer $TOKEN"   # 400
 ```
 
 ### 3. Central error handling (RFC 7807)
 
-**Problem.** Without a standard, every endpoint invents its own error shape, and unhandled exceptions leak stack traces.
+Services throw domain exceptions, and one `@RestControllerAdvice` translates them to HTTP. Security filters run before Spring MVC, so their errors never reach the advice. Dedicated handlers (`RestAuthenticationEntryPoint`, `RestAccessDeniedHandler`) keep `401` and `403` in the same shape. Method-level `AccessDeniedException` is handled explicitly in the advice, because the catch-all `Exception` handler would otherwise turn a `403` into a `500`.
 
-**Solution.** The service layer throws domain exceptions (`ResourceNotFoundException`), and one `@RestControllerAdvice` translates them into HTTP responses. Services stay free of HTTP concerns, so the same service could be reused by a message consumer later.
+### 4. Migrations, not auto-generated schemas
 
-```java
-@ExceptionHandler(ResourceNotFoundException.class)
-public ProblemDetail handleNotFound(ResourceNotFoundException ex) {
-    ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
-    pd.setTitle("Resource not found");
-    return pd;
-}
+Flyway applies versioned SQL files, and Hibernate only *validates* (`ddl-auto: validate`), so a mismatch between entity and table fails at startup with a precise message. Never edit an applied migration; add the next version.
 
-@ExceptionHandler(Exception.class)   // last line of defence
-public ProblemDetail handleUnexpected(Exception ex) {
-    log.error("Unhandled exception", ex);                     // full detail for us
-    ProblemDetail pd = ProblemDetail.forStatusAndDetail(
-            HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred");  // safe for clients
-    pd.setProperty("requestId", MDC.get("requestId"));
-    return pd;
-}
-```
+| Migration | Adds |
+|---|---|
+| `V1` | `tasks` table |
+| `V2` | Indexes for the search filters |
+| `V3` | `users` (unique, lowercase-checked email) |
+| `V4` | `refresh_tokens` |
+| `V5` | `tasks.owner_id` with a foreign key |
+| `V6` | Lockout columns on `users` |
 
-The handler extends `ResponseEntityExceptionHandler`, so framework-level problems (malformed JSON, wrong HTTP method, bad UUID) return correct `4xx` codes instead of being flattened into misleading `500`s.
+### 5. Passwords: slow, salted, upgradable
 
-### 4. Database migrations, not auto-generated schemas
+Passwords are hashed with BCrypt through Spring's delegating encoder, so each hash carries its algorithm prefix (`{bcrypt}...`) and can be migrated to another algorithm later. Plain fast hashes such as SHA-256 are the wrong tool for passwords because they are built to be fast, which lets attackers guess billions of passwords per second.
 
-**Problem.** Letting the ORM modify the schema in production is how data gets destroyed, and nobody can review or roll back what it did.
+Login also removes two side channels. Unknown email, wrong password, locked and disabled accounts all return the **same** `401`, and every attempt performs one BCrypt comparison (against a dummy hash when the user does not exist), so response time does not reveal whether an account exists.
 
-**Solution.** Flyway applies versioned SQL files in order. Hibernate only *validates* that entities match the schema (`ddl-auto: validate`), so drift fails at startup, not in production.
-
-```sql
--- V1__create_tasks_table.sql
-CREATE TABLE tasks (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    title       VARCHAR(200) NOT NULL,
-    description TEXT,
-    status      VARCHAR(20)  NOT NULL DEFAULT 'TODO',
-    due_date    DATE,
-    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ  NOT NULL DEFAULT now()
-);
-```
-
-Rules: never edit an applied migration (add `V3`, `V4`, and so on), and keep each migration small. Other design choices here: UUID keys cannot be guessed (`/tasks/1`, `/tasks/2`...), and `TIMESTAMPTZ` plus `Instant` avoids time-zone ambiguity.
-
-### 5. Pagination, filtering and sorting
-
-**Problem.** A `findAll()` that returns every row works with 50 rows and takes the server down at 500,000.
-
-**Solution.** Three techniques working together.
-
-**a) Specifications for optional, combinable filters.** Instead of one repository method per combination of filters, small reusable predicates are composed:
-
-```java
-public static Specification<Task> from(TaskSearchCriteria c) {
-    Specification<Task> spec = (root, query, cb) -> cb.conjunction();   // WHERE true
-    if (c.status() != null)                    spec = spec.and(hasStatus(c.status()));
-    if (c.q() != null && !c.q().isBlank())     spec = spec.and(titleContains(c.q().trim()));
-    if (c.dueBefore() != null)                 spec = spec.and(dueBefore(c.dueBefore()));
-    return spec;
-}
-```
-
-Values become bound query parameters, never concatenated SQL, which is the defence against SQL injection. In `titleContains`, `%` and `_` are escaped so a search for `100%` matches the literal text.
-
-**b) Whitelisted sort fields.** `sortBy` arrives from the URL, so clients must not be able to name arbitrary entity fields. Only `createdAt`, `updatedAt`, `dueDate`, `title` and `status` are accepted.
-
-**c) A deterministic tie-breaker.** Without one, rows with equal sort values may come back in a different order on each query, so pages can repeat or skip rows:
+### 6. JWT access tokens and the filter chain
 
 ```text
-rows A B C D all share the same due_date, page size 2
-
-without a tie-breaker                      with ORDER BY due_date, id
-page 1 -> A B   (database order A B C D)   page 1 -> A B   (always)
-page 2 -> C A   (database order B D C A)   page 2 -> C D   (always)
-               ^ A repeated, D never shown
+header.payload.signature
+payload = { sub: <user id>, email, roles: ["USER"], iss, iat, exp, jti }
+signature = HMAC-SHA256(header.payload, secret)
 ```
 
+A JWT is **signed, not encrypted**: anyone can read the payload, but nobody can change it without the key. Tokens live 15 minutes because a stateless token cannot be revoked. Verification is done by Spring Security's resource-server support (signature, expiry, issuer), and the API stays stateless: no session, so CSRF protection is not needed for Bearer tokens in the `Authorization` header.
+
+### 7. Refresh token rotation and reuse detection
+
+Refresh tokens are 256-bit random opaque strings, stored only as SHA-256 hashes (a fast hash is correct here because the token has 256 bits of entropy and must be looked up by hash). Each use consumes the token and issues a successor in the same *family*. Presenting a spent token revokes the entire family.
+
+Two details make this correct:
+
+- **Atomic single use.** The state change is a database compare-and-set (`UPDATE ... WHERE used_at IS NULL`), so two simultaneous requests cannot both succeed.
+- **"Write, then throw" needs `noRollbackFor`.** On reuse the service revokes the family and then throws a `401`. A normal rollback would undo the revocation, so the transaction is marked `noRollbackFor`. The same applies to the failed-login counter.
+
+### 8. Authorization: ownership first, roles second
+
 ```java
-Pageable stable = PageRequest.of(page, size, pageable.getSort().and(Sort.by("id")));
-```
-
-The response uses the project's own `PageResponse` record, not Spring's `Page`. That keeps the public contract under this project's control, so a framework upgrade cannot silently change the JSON clients depend on.
-
-**Known limit.** Offset pagination gets slower on very deep pages (the database still walks the skipped rows), and `LIKE '%text%'` cannot use a normal index. See [Limitations and roadmap](#limitations-and-roadmap).
-
-### 6. Request tracing with a correlation ID
-
-**Problem.** With concurrent requests the log is interleaved, so "a user got an error at 3pm" is unanswerable.
-
-**Solution.** A servlet filter gives every request an ID, stores it in the logging context (MDC), returns it in the `X-Request-Id` header, and logs one summary line per request.
-
-```java
-String requestId = isSafe(incoming) ? incoming : UUID.randomUUID().toString();
-MDC.put("requestId", requestId);
-response.setHeader("X-Request-Id", requestId);
-try {
-    chain.doFilter(request, response);
-} finally {
-    log.info("{} {} -> {} ({} ms)", method, uri, status, ms);
-    MDC.remove("requestId");            // threads are reused: always clean up
+private Task getAccessible(UUID id, AuthenticatedUser user) {
+    return repository.findById(id)
+            .filter(t -> user.admin() || t.getOwnerId().equals(user.id()))
+            .orElseThrow(() -> new ResourceNotFoundException("Task", id));
 }
 ```
 
-Two details matter. An incoming ID is accepted (so a gateway can trace across services) but validated against `[A-Za-z0-9-]{8,64}`, because a header with newlines could forge fake log lines (log injection). And `MDC.remove` in `finally` stops one request's ID leaking into the next request on the same thread.
+Broken object-level authorization (BOLA/IDOR) is the number one API vulnerability: a logged-in user changes an id in the URL and reads someone else's data. Every task query is scoped to the caller, and a task that belongs to someone else returns `404`, the same response as a task that does not exist, so ids reveal nothing. Role checks (`@PreAuthorize("hasRole('ADMIN')")`) come on top for operations that need them.
 
-```bash
-curl -i -H "X-Request-Id: demo-12345678" http://localhost:8080/api/v1/tasks
-# the response echoes the ID, and the server log line shows [demo-12345678]
+### 9. Brute-force defences
+
+| Layer | Behaviour |
+|---|---|
+| `RateLimitFilter` | 10 requests per minute per client IP, per auth endpoint, then `429` with `Retry-After`. Runs before any BCrypt work |
+| Account lockout | 5 failed logins lock the account for 15 minutes. A locked account refuses even the correct password and returns the generic `401` |
+| Atomic counters | Failure counts use `UPDATE ... SET n = n + 1` and are re-read inside the same transaction, so parallel guesses cannot dodge the counter |
+
+### 10. Secrets and configuration
+
+Everything environment-specific comes from environment variables. The signing secret has no default, must decode to at least 32 bytes, and the app refuses to start otherwise. Error messages never include secret values.
+
+### 11. Pagination, filtering and sorting
+
+Specifications compose optional filters (values are bound parameters, so SQL injection is not possible, and `LIKE` wildcards are escaped). Sort fields are whitelisted. A unique tie-breaker (`id`) keeps ordering deterministic:
+
+```text
+rows A B C D share the same due_date, page size 2
+
+without a tie-breaker                      with ORDER BY due_date, id
+page 1 -> A B                              page 1 -> A B   (always)
+page 2 -> C A   (A repeated, D never)      page 2 -> C D   (always)
 ```
 
-### 7. Configuration through the environment
+### 12. Observability
 
-**Problem.** Credentials in source code end up on GitHub, and one build cannot run in several environments.
-
-**Solution.** Build once, configure by environment variables, with safe local defaults.
-
-```yaml
-spring:
-  datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/taskflow}
-    username: ${DB_USER:taskflow}
-    password: ${DB_PASSWORD:taskflow}
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    open-in-view: false
-```
-
-Inside Docker Compose the app reaches the database by service name (`db`), not `localhost`, because inside a container `localhost` is the container itself. The same image runs everywhere with only the variables changing.
-
-### 8. Transactions
-
-Write methods are `@Transactional`, so everything in them succeeds or fails together. Read methods use `@Transactional(readOnly = true)`, which lets Hibernate skip dirty-checking. Responses are built only after generated values (IDs, timestamps) have been assigned, which is a classic source of "null `createdAt` in the `201` response" bugs.
+A servlet filter assigns every request an `X-Request-Id` (an incoming id is accepted only if it matches `[A-Za-z0-9-]{8,64}`, which prevents log injection), stores it in the logging context and logs one summary line per request. Security events (failed logins, lockouts, refresh reuse) are logged with user ids, never with passwords, tokens or raw emails.
 
 ---
 
 ## Testing
 
-Many fast unit tests, fewer realistic integration tests:
-
 ```text
         /\          Integration: full app + real PostgreSQL (Testcontainers)
-       /  \         validation, SQL, migrations, JSON, status codes
+       /  \         validation, SQL, migrations, security rules, status codes
       /----\
-     /      \       Unit: one class, collaborators mocked (JUnit, Mockito, AssertJ)
-    /________\      business rules, in milliseconds
+     /      \       Unit: one class, collaborators mocked
+    /________\      business rules and ownership logic in milliseconds
 ```
 
-**Why a real PostgreSQL, not an in-memory fake?** Fakes behave differently from production (UUID handling, `TIMESTAMPTZ`, `LIKE` escaping). A test that passes on a fake and fails in production is worse than no test. Testcontainers starts a disposable PostgreSQL 16 for the run, and Flyway applies the real migrations to it, so the migrations are tested too.
-
-```java
-@SpringBootTest
-@AutoConfigureMockMvc
-@Testcontainers
-class TaskApiIntegrationTest {
-
-    @Container
-    @ServiceConnection
-    static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
-
-    @Test
-    void search_treatsPercentSignAsLiteralText() throws Exception {
-        repository.save(new Task("100% done", null, null));
-        repository.save(new Task("1000 tasks", null, null));
-
-        mockMvc.perform(get("/api/v1/tasks").param("q", "100%"))
-                .andExpect(jsonPath("$.totalElements").value(1));
-    }
-}
-```
-
-Notable regression tests, each guarding a bug found during development:
+Integration tests run against a disposable PostgreSQL 16, because fakes behave differently from production. Security behaviour is tested as hard as business behaviour:
 
 | Test | Guards against |
 |---|---|
-| `search_treatsPercentSignAsLiteralText` | `LIKE` wildcards leaking into user searches |
-| `pagination_withIdenticalSortValues_neverRepeatsOrSkipsItems` | Unstable ordering across pages |
-| `search_withInvalidInputs_returns400` | Framework silently defaulting bad parameters |
-| `createTask_returns201_withLocationAndGeneratedFields` | Null timestamps in create responses |
-| `everyResponse_carriesRequestId_andReusesValidIncomingOne` | Missing or unsafe request IDs |
+| `protectedEndpoint_withoutToken_returns401_withProblemJson` | Accidentally public endpoints |
+| `tamperedToken_returns401`, `expiredToken_returns401` | Forged or stale tokens |
+| `login_unknownEmailAndWrongPassword_areIndistinguishable` | Account enumeration |
+| `register_storesAHash_neverThePlaintext` | Plaintext passwords in the database |
+| `database_neverStoresTheRawToken` | Raw refresh tokens in the database |
+| `reuseOfAnOldToken_revokesTheWholeFamily` | Refresh token theft, and the rollback-swallows-revocation bug |
+| `userSeesOnlyOwnTasks`, `getAnotherUsersTask_returns404_notForbidden` | Cross-user data access (BOLA) |
+| `adminEndpoint_asUser_returns403_asProblemJson` | Privilege escalation, and the `403`-becomes-`500` trap |
+| `accountLocksAfterFiveFailures_evenForTheCorrectPassword` | Brute force, and the lockout counter surviving the thrown exception |
+| `loginIsRateLimited_afterThreeRequests` | Unlimited guessing |
+| `corsPreflight_allowsConfiguredOrigin_only` | Overly permissive CORS |
+| `pagination_withIdenticalSortValues_neverRepeatsOrSkipsItems` | Unstable page ordering |
 
 ```bash
 ./mvnw verify          # run everything (Docker must be running)
-./mvnw test            # same tests, without packaging
 ```
 
 ---
 
 ## Docker and CI/CD
 
-### The image
-
-A multi-stage build keeps build tools and source code out of the final image:
-
-```dockerfile
-# Stage 1: build with the JDK and Maven
-FROM eclipse-temurin:21-jdk AS build
-WORKDIR /app
-COPY mvnw pom.xml ./
-COPY .mvn .mvn
-COPY src src
-RUN --mount=type=cache,target=/root/.m2 \
-    chmod +x mvnw && ./mvnw -B package -DskipTests
-
-# Stage 2: run with only the JRE and the jar
-FROM eclipse-temurin:21-jre
-WORKDIR /app
-RUN groupadd --system app && useradd --system --gid app app
-COPY --from=build /app/target/*.jar app.jar
-USER app
-EXPOSE 8080
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
-```
-
-| Decision | Reason |
-|---|---|
-| Multi-stage | Smaller image, less attack surface, no source code shipped |
-| BuildKit cache mount for `~/.m2` | Downloaded dependencies survive between builds, even when a layer is invalidated |
-| Non-root user | A compromised process should not be root in the container |
-| `MaxRAMPercentage=75` | The JVM sizes its heap from the container limit, not the host |
-| `-DskipTests` in the image build | Tests run in CI first, so the image build does not need Docker-in-Docker |
-
-`docker-compose.yml` runs the app and PostgreSQL together. The app waits for the database healthcheck (`depends_on: condition: service_healthy`) instead of crashing on startup.
-
-### The pipeline
+A multi-stage `Dockerfile` keeps build tools and source out of the final image: a JDK stage builds the jar, and a JRE stage runs it as a non-root user with `MaxRAMPercentage=75`. A BuildKit cache mount keeps Maven downloads between builds.
 
 ```mermaid
 flowchart LR
     A["Push or pull request"] --> B["Job: test<br/>JDK 21, mvnw verify<br/>Testcontainers PostgreSQL"]
-    B -->|pass| C["Job: docker<br/>compose up --build<br/>smoke test"]
+    B -->|pass| C["Job: docker<br/>generate throwaway JWT secret<br/>compose up and smoke test"]
     B -->|fail| X["Stop: no image is built"]
     C -->|main branch only| D["Build and push image<br/>ghcr.io, tags: sha and latest"]
 ```
 
-| Stage | What it proves |
-|---|---|
-| `test` job | Code compiles and all tests pass on a clean machine |
-| Smoke test | The built **image** starts, runs migrations, answers `/actuator/health` and accepts a real `POST` |
-| Publish (main only) | Only reviewed, passing code produces a deployable image, tagged with its commit SHA for traceability |
-
-The pipeline authenticates to the registry with the short-lived `GITHUB_TOKEN`. No password is stored anywhere in the repository.
+The smoke test runs the **real security flow** against the built container: register, log in, create a task with the Bearer token, refresh the token, confirm the used refresh token is rejected, and confirm an unauthenticated request returns `401`. The pipeline authenticates to the registry with the short-lived `GITHUB_TOKEN`, and the CI signing secret is generated per run and discarded.
 
 ---
 
@@ -673,32 +579,31 @@ The pipeline authenticates to the registry with the short-lived `GITHUB_TOKEN`. 
 
 ```text
 taskflowAPI/
-├── .github/workflows/ci.yml            CI: test, smoke test, publish image
+├── .github/workflows/ci.yml
+├── .env.example                          Template for local secrets (.env is gitignored)
 ├── src/main/java/com/james/taskflow/
 │   ├── TaskflowApplication.java
-│   ├── common/
-│   │   ├── PageResponse.java           Own pagination contract
-│   │   ├── config/OpenApiConfig.java   API metadata for Swagger
-│   │   ├── exception/                  Domain exceptions + GlobalExceptionHandler
-│   │   └── web/RequestIdFilter.java    Correlation IDs and access log line
-│   └── task/
-│       ├── Task.java                   JPA entity
-│       ├── TaskStatus.java             Enum: TODO, IN_PROGRESS, DONE
-│       ├── TaskController.java         HTTP layer
-│       ├── TaskService.java            Business rules and transactions
-│       ├── TaskRepository.java         Data access
-│       ├── TaskSpecifications.java     Composable filters
-│       └── dto/                        Request, response and search records
+│   ├── auth/
+│   │   ├── AuthController.java           register, login, refresh, logout, me
+│   │   ├── AuthService.java              credentials, lockout, token issuing
+│   │   ├── dto/                          Request and response records
+│   │   └── token/                        RefreshToken entity, repository, rotation service, cleanup job
+│   ├── user/                             User entity, Role, repository, admin listing
+│   ├── security/
+│   │   ├── SecurityConfig.java           Filter chain, CORS, headers, rules
+│   │   ├── JwtConfig.java, JwtService.java, JwtProperties.java
+│   │   ├── RateLimitFilter.java, AuthenticatedUser.java, AdminBootstrap.java
+│   │   └── Rest*Handler.java, ProblemJson.java
+│   ├── task/                             Entity, controller, service, specifications, DTOs
+│   └── common/                           PageResponse, exceptions, RequestIdFilter, OpenAPI config
 ├── src/main/resources/
 │   ├── application.yml
-│   └── db/migration/                   V1 create table, V2 indexes
-├── src/test/java/...                   Unit and Testcontainers integration tests
-├── Dockerfile                          Multi-stage image
-├── docker-compose.yml                  App + PostgreSQL
+│   └── db/migration/                     V1 to V6
+├── src/test/java/...                     Unit and Testcontainers integration tests
+├── Dockerfile
+├── docker-compose.yml
 └── pom.xml
 ```
-
-Code is organised **by feature** (`task/`), not by technical layer, so everything about tasks lives together and the module could later become its own service.
 
 ---
 
@@ -706,64 +611,70 @@ Code is organised **by feature** (`task/`), not by technical layer, so everythin
 
 | Decision | Why | Trade-off accepted |
 |---|---|---|
-| UUID primary keys | Not guessable, safe to merge data from several sources | Larger indexes, not human-friendly |
-| Flyway with `ddl-auto: validate` | Reviewable, repeatable schema changes | Every change needs a migration file |
-| DTO records, no Lombok | No hidden code generation, immutable by default | A little more mapping code |
-| Specifications for filtering | Combinable filters without a method per combination | More code than one fixed query |
-| Reject invalid parameters (`400`) | Clients learn about mistakes immediately | Less forgiving than silent defaults |
-| Whitelisted sort fields plus `id` tie-breaker | No internals exposed, stable pages | A field must be added to the list deliberately |
-| Own `PageResponse` instead of Spring's `Page` | The public JSON contract is controlled by this project | One small extra class |
-| Offset pagination | Simple, supports jumping to a page number | Slow on very deep pages (cursor pagination is the upgrade) |
-| Testcontainers instead of H2 | Tests run against the real database engine | Needs Docker, slower start |
-| RFC 7807 error bodies | One standard shape for all errors | Slightly more verbose than a plain message |
-| Request IDs via a servlet filter | Cross-cutting concern lives in one place | One more component to maintain |
+| Stateless JWT access tokens, 15 minute lifetime | No session store, horizontally scalable | Cannot be revoked early, so lifetimes stay short |
+| Opaque, hashed, rotating refresh tokens | Revocable, theft-detecting sessions | A database lookup per refresh |
+| HS256 with a shared secret | Simplest correct choice for one service | Services that only verify would need an asymmetric key pair (planned for the microservices project) |
+| Spring's resource server for verification | Audited code instead of hand-written verification | Framework coupling |
+| `404` for other users' tasks | Ids reveal nothing | Slightly less informative errors |
+| Same `401` for every login failure | No account enumeration | Harder to debug login problems (logs have the detail) |
+| Account lockout | Stops credential guessing against one account | An attacker can lock someone out, mitigated by short locks and IP rate limits |
+| In-memory rate limiter | No extra infrastructure | Per instance only, a shared store replaces it later |
+| No Lombok, DTO records | No hidden code generation | A little more mapping code |
+| Specifications for filtering | Combinable filters | More code than one fixed query |
+| Offset pagination with a tie-breaker | Simple, stable | Deep pages get slower (cursor pagination is the upgrade) |
+| Testcontainers, not an in-memory database | Tests run on the real engine | Needs Docker |
+| Flyway with `ddl-auto: validate` | Reviewable schema history | Every change needs a migration |
 
 ---
 
 ## Troubleshooting
 
 <details>
+<summary><b>The app will not start: "Could not resolve placeholder 'JWT_SECRET'" or "not valid base64"</b></summary>
+
+`JWT_SECRET` is missing or is not the generated output. Generate one (`openssl rand -base64 32`) and set exactly that single line, with no quotes, spaces or angle brackets. Docker Compose reads it from `.env`, and IntelliJ reads it from the run configuration's environment variables. A command or placeholder pasted by mistake produces `Illegal base64 character`.
+
+</details>
+
+<details>
+<summary><b>Everything returns 401</b></summary>
+
+The endpoint needs a Bearer token. Log in, then send `Authorization: Bearer <accessToken>`. Access tokens expire after 15 minutes: use `/auth/refresh`.
+
+</details>
+
+<details>
+<summary><b>I get 429 Too Many Requests while testing by hand</b></summary>
+
+Auth endpoints allow 10 requests per minute per IP. Wait for the `Retry-After` seconds, or raise `app.rate-limit.max-requests` locally. Tests use a high limit through `application-test.yml`.
+
+</details>
+
+<details>
+<summary><b>My account is locked</b></summary>
+
+Five failed logins lock an account for 15 minutes, and a locked account refuses even the correct password. Wait, or clear it locally: `update users set locked_until = null, failed_login_attempts = 0 where email = '...';`
+
+</details>
+
+<details>
 <summary><b>Tests fail with "Could not find a valid Docker environment"</b></summary>
 
-Docker Desktop is not running or not reachable. Start it, wait until it says the engine is running, and check:
-
-```bash
-docker ps
-```
-
-The integration tests need Docker because they start PostgreSQL with Testcontainers.
+Start Docker Desktop and check `docker ps`. The integration tests need Docker for Testcontainers.
 
 </details>
 
 <details>
 <summary><b>Port 5432 is already in use</b></summary>
 
-A local PostgreSQL is already listening. Stop it, or change the host side of the port mapping in `docker-compose.yml` (for example `"5433:5432"`) and set `DB_URL` accordingly.
+Stop the local PostgreSQL, or change the host side of the port mapping in `docker-compose.yml` (for example `"5433:5432"`) and set `DB_URL`.
 
 </details>
 
 <details>
-<summary><b>Maven downloads time out or hang</b></summary>
+<summary><b>Maven downloads time out</b></summary>
 
-Dependency downloads depend on your connection to Maven Central. Retry on a different network, or configure a mirror in `~/.m2/settings.xml`. The GitHub Actions pipeline is unaffected, because runners have fast connections.
-
-</details>
-
-<details>
-<summary><b><code>Permission denied: ./mvnw</code> or <code>bad interpreter</code> on Linux or macOS</b></summary>
-
-```bash
-chmod +x mvnw
-```
-
-The repository includes a `.gitattributes` file that keeps shell scripts on LF line endings, which prevents the `bad interpreter` error when files are edited on Windows.
-
-</details>
-
-<details>
-<summary><b>The app starts but cannot reach the database</b></summary>
-
-Check that the `db` container is healthy (`docker compose ps`). When running the app on your machine, the host is `localhost`. When running it in a container on the Compose network, the host is `db`.
+That is the connection to Maven Central. Retry on another network or configure a mirror in `~/.m2/settings.xml`. The CI pipeline is unaffected.
 
 </details>
 
@@ -771,37 +682,42 @@ Check that the `db` container is healthy (`docker compose ps`). When running the
 
 ## Limitations and roadmap
 
-Knowing what is *not* done is part of engineering. Current limitations and the planned next steps:
-
 | Area | Status | Next step |
 |---|---|---|
-| Authentication and authorization | Not yet: the API is open | JWT access and refresh tokens, roles, per-user task ownership |
-| Rate limiting and abuse protection | Not yet | Per-client limits (planned alongside caching) |
-| Pagination at very large scale | Offset-based | Keyset (cursor) pagination |
-| Text search | `LIKE` on title | Full-text search with proper indexing |
-| Swagger UI exposure | Public by default | Disable or protect it in production profiles |
-| Metrics and tracing | Health probes only | Prometheus metrics and distributed tracing |
+| Browser clients | Refresh token is returned in the JSON body | Move it to an `HttpOnly`, `Secure`, `SameSite` cookie when the React frontend is built, with matching CSRF handling |
+| Rate limiting | In-memory, per instance | Redis-backed shared limiter (caching project) |
+| Account lifecycle | No email verification, password reset or MFA | Verification and reset flows through an email provider |
+| Token signing | HS256 shared secret | Asymmetric keys with key rotation once several services verify tokens |
+| Access token revocation | Not possible before expiry | Short lifetimes now, a denylist if needed later |
+| Pagination | Offset-based | Keyset (cursor) pagination for very large lists |
+| Text search | `LIKE` on title | Full-text search (search project) |
+| Metrics | Health probes only | Prometheus metrics and tracing |
 
 ---
 
 ## Follow the build
 
-The repository history is written to be read in order. Each step introduces one group of ideas, so you can rebuild the project yourself:
+The history is written to be read in order. Each step introduces one group of ideas:
 
 | Step | Introduces | Key files |
 |---|---|---|
-| 1. Foundation | Project setup, Docker database, config via environment, first migration | `docker-compose.yml`, `application.yml`, `V1__...sql` |
-| 2. CRUD | Entity, DTOs, validation, service and controller, central error handling | `task/`, `GlobalExceptionHandler` |
-| 3. Search | Pagination, Specifications, sort whitelist, indexes | `TaskSpecifications`, `V2__...sql` |
-| 4. Testing | Unit tests, Testcontainers integration tests, regression tests | `src/test/java/` |
-| 5. Operability | OpenAPI docs, request IDs, health probes, multi-stage Docker image | `OpenApiConfig`, `RequestIdFilter`, `Dockerfile` |
-| 6. Delivery | GitHub Actions pipeline, smoke test, published image | `.github/workflows/ci.yml` |
+| 1. Foundation | Setup, Docker database, environment config, first migration | `docker-compose.yml`, `application.yml`, `V1` |
+| 2. CRUD | Entity, DTOs, validation, central error handling | `task/`, `GlobalExceptionHandler` |
+| 3. Search | Pagination, Specifications, sort whitelist, indexes | `TaskSpecifications`, `V2` |
+| 4. Testing | Unit and Testcontainers integration tests | `src/test/java/` |
+| 5. Operability | OpenAPI, request ids, health probes, multi-stage image | `RequestIdFilter`, `Dockerfile` |
+| 6. Delivery | CI pipeline, smoke test, published image | `.github/workflows/ci.yml` |
+| 7. Identity | Users table, BCrypt, registration | `V3`, `auth/AuthService` |
+| 8. Authentication | Login, JWT, the security filter chain | `security/`, `JwtService` |
+| 9. Sessions | Rotating refresh tokens, reuse detection, logout | `V4`, `auth/token/` |
+| 10. Authorization | Task ownership, roles, 401 vs 403, BOLA protection | `V5`, `TaskService`, `AdminController` |
+| 11. Hardening | Rate limiting, lockout, headers, CORS, cleanup job | `V6`, `RateLimitFilter`, `SecurityConfig` |
 
 ---
 
 ## Author
 
-Built by **James**, a backend engineer in training working toward remote backend roles. This is project 1 of a series of backend portfolio projects, each practising the same core ideas at a higher level. See the [GitHub profile](https://github.com/James-oss796) for the others.
+Built by **James**, a backend engineer in training working toward remote backend roles. This is part of a series of backend portfolio projects, each practising the same core ideas at a higher level. See the [GitHub profile](https://github.com/James-oss796) for the others.
 
 ## License
 
