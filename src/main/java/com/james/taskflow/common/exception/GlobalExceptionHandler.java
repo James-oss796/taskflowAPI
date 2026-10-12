@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.http.*;
 import org.apache.tomcat.util.http.InvalidParameterException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -83,6 +84,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleInvalidRefreshToken(InvalidRefreshTokenException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
         pd.setTitle("Authentication Failed");
+        return pd;
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)   // org.springframework.security.access
+    public ProblemDetail handleAccessDenied(AccessDeniedException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN,
+                "You do not have permission to perform this action");
+        pd.setTitle("Forbidden");
         return pd;
     }
 }

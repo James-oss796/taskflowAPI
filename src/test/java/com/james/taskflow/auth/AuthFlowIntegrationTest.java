@@ -18,6 +18,9 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -105,10 +108,34 @@ class AuthFlowIntegrationTest {
     void tamperedToken_returns401() throws Exception {
         register("tamper@example.com", "correct-horse-battery");
         String token = login("tamper@example.com", "correct-horse-battery");
-        String tampered = token.substring(0, token.length() - 1)
-                + (token.endsWith("A") ? "B" : "A");
+        String tampered = tamper(token);
 
         mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + tampered))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void forgedPayload_withOriginalSignature_returns401() throws Exception {
+        register("forge@example.com", "correct-horse-battery");
+        String token = login("forge@example.com", "correct-horse-battery");
+
+        String[] parts = token.split("\\.");
+        String payload = new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
+        String forged = payload.replace("\"USER\"", "\"ADMIN\"");
+        assertThat(forged).isNotEqualTo(payload);              // make sure we really changed the roles
+
+        String forgedToken = parts[0] + "."
+                + Base64.getUrlEncoder().withoutPadding().encodeToString(forged.getBytes(StandardCharsets.UTF_8))
+                + "." + parts[2];
+
+        mockMvc.perform(get("/api/v1/admin/users").header("Authorization", "Bearer " + forgedToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    private static String tamper(String token) {
+        String[] parts = token.split("\\.");
+        char first = parts[2].charAt(0);                       // first signature char: all 6 bits are significant
+        char replacement = (first == 'A') ? 'B' : 'A';
+        return parts[0] + "." + parts[1] + "." + replacement + parts[2].substring(1);
     }
 }

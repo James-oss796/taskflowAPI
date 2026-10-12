@@ -2,6 +2,7 @@ package com.james.taskflow.task;
 
 import com.james.taskflow.common.PageResponse;
 import com.james.taskflow.common.exception.BadRequestException;
+import com.james.taskflow.security.AuthenticatedUser;
 import com.james.taskflow.task.dto.CreateTaskRequest;
 import com.james.taskflow.task.dto.TaskResponse;
 import com.james.taskflow.task.dto.TaskSearchCriteria;
@@ -18,6 +19,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
@@ -39,8 +42,8 @@ public class TaskController {
     @ApiResponse(responseCode = "201", description = "Task Created")
     @ApiResponse(responseCode = "400", description = "Validation failed")
     @PostMapping
-    public ResponseEntity<TaskResponse> create(@Valid @RequestBody CreateTaskRequest req) {
-        TaskResponse created = taskService.create(req);
+    public ResponseEntity<TaskResponse> create(@Valid @RequestBody CreateTaskRequest req, @AuthenticationPrincipal Jwt jwt) {
+        TaskResponse created = taskService.create(req, AuthenticatedUser.from(jwt));
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}")
                 .buildAndExpand(created.id())
@@ -57,25 +60,27 @@ public class TaskController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String direction) {
+            @RequestParam(defaultValue = "desc") String direction,
+            @AuthenticationPrincipal Jwt jwt
+            ) {
 
         Sort.Direction dir = Sort.Direction.fromOptionalString(direction)
                 .orElseThrow(() -> new BadRequestException("direction must be 'asc' or 'desc'"));
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(dir, sortBy));
-        return taskService.search(new TaskSearchCriteria(status, q, dueBefore), pageable);
+        return taskService.search(new TaskSearchCriteria(status, q, dueBefore), pageable, AuthenticatedUser.from(jwt));
     }
 
     @Operation(summary = "Find a task by Id")
     @GetMapping("/{id}")
-    public TaskResponse findById(@PathVariable UUID id) {
-        return taskService.findById(id);
+    public TaskResponse findById(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
+        return taskService.findById(id, AuthenticatedUser.from(jwt));
     }
 
     @Operation(summary = "Update a task")
     @PutMapping("/{id}")
-    public TaskResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateTaskRequest req) {
-        return taskService.update(id, req);
+    public TaskResponse update(@PathVariable UUID id, @Valid @RequestBody UpdateTaskRequest req, @AuthenticationPrincipal Jwt jwt) {
+        return taskService.update(id, req, AuthenticatedUser.from(jwt));
     }
 
     @Operation(summary = "Delete a task")
@@ -83,7 +88,7 @@ public class TaskController {
     @ApiResponse(responseCode = "400", description = "Deletion failed")
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID id) {
-        taskService.delete(id);
+    public void delete(@PathVariable UUID id, @AuthenticationPrincipal Jwt jwt) {
+        taskService.delete(id, AuthenticatedUser.from(jwt));
     }
 }

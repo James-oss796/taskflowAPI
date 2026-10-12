@@ -21,11 +21,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - .env
     environment:
       DB_URL: jdbc:postgresql://db:5432/taskflow
       DB_USER: taskflow
       DB_PASSWORD: taskflow
-      JWT_SECRET: ${JWT_SECRET:-}
     ports:
           - "8080:8080"
 

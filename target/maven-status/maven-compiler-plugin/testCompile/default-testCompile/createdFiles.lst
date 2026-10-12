@@ -1,2 +1,8 @@
-com\james\taskflow\auth\AuthFlowIntegrationTest.class
+com\james\taskflow\auth\AdminBootstrapIntegrationTest.class
+com\james\taskflow\auth\RateLimitIntegrationTest.class
+com\james\taskflow\auth\HardeningIntegrationTest.class
+com\james\taskflow\support\WithJwtUserSecurityContextFactory.class
 com\james\taskflow\auth\AuthApiIntegrationTest.class
+com\james\taskflow\auth\AuthorizationIntegrationTest.class
+com\james\taskflow\auth\AuthFlowIntegrationTest.class
+com\james\taskflow\support\WithJwtUser.class

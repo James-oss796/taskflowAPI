@@ -4,6 +4,7 @@ import com.james.taskflow.task.dto.TaskSearchCriteria;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 public final class TaskSpecifications {
     private TaskSpecifications() {}
@@ -35,6 +36,10 @@ public final class TaskSpecifications {
 
     private static Specification<Task> dueBefore(LocalDate date) {
             return (root, query, cb) -> cb.lessThan(root.get("dueDate"), date);
+    }
+
+    public static Specification<Task> ownedBy(UUID ownerId) {
+        return (root, query, cb) -> cb.equal(root.get("ownerId"), ownerId);
     }
 
 }
