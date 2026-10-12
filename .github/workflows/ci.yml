@@ -77,6 +77,19 @@ jobs:
 
           # an unauthenticated request must be rejected
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/v1/tasks)" = "401"
+          LOGIN=$(curl -fsS -X POST http://localhost:8080/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"ci@example.com","password":"ci-smoke-password"}')
+          TOKEN=$(echo "$LOGIN" | jq -r .accessToken)
+          REFRESH=$(echo "$LOGIN" | jq -r .refreshToken)
+  
+          curl -fsS -X POST http://localhost:8080/api/v1/auth/refresh \
+            -H 'Content-Type: application/json' \
+            -d "{\"refreshToken\":\"$REFRESH\"}" > /dev/null
+  
+          # replaying the used refresh token must fail
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8080/api/v1/auth/refresh \
+            -H 'Content-Type: application/json' -d "{\"refreshToken\":\"$REFRESH\"}")" = "401"
 
       - name: Show logs on failure
         if: failure()
