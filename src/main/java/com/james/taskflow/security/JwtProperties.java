@@ -12,10 +12,11 @@ import java.time.Duration;
 public record JwtProperties (
         @NotBlank String secret,
         @NotBlank String issuer,
-        @NotNull Duration accessTokenTtl
+        @NotNull Duration accessTokenTtl,
+        @NotNull Duration refreshTokenTtl
 ) {
     @Override
     public String toString() {
-        return "JwtProperties[secret=***, issuer=" + issuer + ", accessTokenTtl=" + accessTokenTtl + "]";
+        return "JwtProperties[secret=***, issuer=" + issuer + ", accessTokenTtl=" + accessTokenTtl + ", refreshTokenTtl=" + refreshTokenTtl + "]";
     }
 }

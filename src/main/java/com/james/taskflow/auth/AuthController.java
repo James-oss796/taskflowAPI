@@ -1,9 +1,6 @@
 package com.james.taskflow.auth;
 
-import com.james.taskflow.auth.dto.CurrentUserResponse;
-import com.james.taskflow.auth.dto.LoginRequest;
-import com.james.taskflow.auth.dto.LoginResponse;
-import com.james.taskflow.auth.dto.RegisterRequest;
+import com.james.taskflow.auth.dto.*;
 import com.james.taskflow.user.dto.UserResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -35,6 +32,19 @@ public class AuthController {
     @PostMapping("/login")
     public LoginResponse login(@Valid @RequestBody LoginRequest request) {
         return authService.login(request);
+    }
+
+    @Operation(summary = "Exchange a refresh token for a new access token and refresh token")
+    @PostMapping("/refresh")
+    public LoginResponse refresh(@Valid @RequestBody RefreshRequest request) {
+        return authService.refresh(request);
+    }
+
+    @Operation(summary = "Log out: revoke the refresh token's whole session")
+    @PostMapping("/logout")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void logout(@Valid @RequestBody RefreshRequest request) {
+        authService.logout(request);
     }
 
     @Operation(summary = "Who am I? Returns the identity carried by the token")
