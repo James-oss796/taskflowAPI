@@ -32,3 +32,10 @@ logging:
     org.hibernate.SQL: debug
   pattern:
     level: "%5p [%X{requestId:-}]"
+
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: taskflow-api
+    access-token-ttl: 15m
