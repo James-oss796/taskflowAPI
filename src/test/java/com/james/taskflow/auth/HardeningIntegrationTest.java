@@ -1,5 +1,6 @@
 package com.james.taskflow.auth;
 
+import com.james.taskflow.TestContainersPostgres;
 import com.james.taskflow.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @Testcontainers
 @ActiveProfiles("test")
-public class HardeningIntegrationTest {
+public class HardeningIntegrationTest extends TestContainersPostgres {
 
     @Autowired
     MockMvc mockMvc;
